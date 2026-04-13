@@ -1,19 +1,36 @@
-FROM python:3.11-slim AS builder
+FROM python:3.11-alpine AS builder
+
 WORKDIR /install
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --prefix=/install --no-cache-dir -r requirements.txt
 
-FROM python:3.11-slim AS runtime
+FROM python:3.11-alpine
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app
+
 WORKDIR /app
-RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+
+# Update OS packages
+RUN apk update && apk upgrade
+
+# Create non-root user
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+# Copy dependencies
 COPY --from=builder /install /usr/local
+
+# Create uploads dir
 RUN mkdir -p /app/uploads && chown -R appuser:appgroup /app/uploads
+
+# Copy app
 COPY --chown=appuser:appgroup app ./app
+
 USER appuser
+
 EXPOSE 8000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD curl -f http://localhost:8000/health || exit 1
-CMD ["uvicorn", "app.main:app", "--reload"]
+
+HEALTHCHECK CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
